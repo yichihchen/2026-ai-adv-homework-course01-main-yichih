@@ -70,22 +70,45 @@
       </table>
     </div>
 
-    <!-- Payment Buttons -->
-    <div v-if="order.status === 'pending'" class="flex gap-4">
-      <button
-        @click="handlePaySuccess"
-        :disabled="paying"
-        class="bg-sage text-white px-8 py-3 rounded-full text-sm font-medium hover:bg-sage/90 transition-colors disabled:opacity-50"
-      >
-        {{ paying ? '處理中...' : '付款成功' }}
-      </button>
-      <button
-        @click="handlePayFail"
-        :disabled="paying"
-        class="bg-red-500 text-white px-8 py-3 rounded-full text-sm font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
-      >
-        {{ paying ? '處理中...' : '付款失敗' }}
-      </button>
+    <!-- Payment Section -->
+    <div v-if="order.status === 'pending'" class="bg-white rounded-2xl shadow-sm p-6">
+      <h2 class="font-medium text-text-primary mb-3">付款</h2>
+      <div class="flex flex-wrap gap-3">
+        <button
+          @click="goToEcpay"
+          :disabled="paying"
+          class="bg-rose-primary text-white px-8 py-3 rounded-full text-sm font-medium hover:bg-rose-dark transition-colors disabled:opacity-50"
+        >
+          {{ paying ? '處理中...' : '前往綠界付款' }}
+        </button>
+        <button
+          @click="requeryPayment"
+          :disabled="paying"
+          class="bg-white border border-rose-primary text-rose-primary px-6 py-3 rounded-full text-sm font-medium hover:bg-rose-primary/5 transition-colors disabled:opacity-50"
+        >
+          {{ paying ? '查詢中...' : '重新查詢付款狀態' }}
+        </button>
+      </div>
+
+      <div class="mt-6 pt-4 border-t border-dashed border-gray-200">
+        <p class="text-xs text-text-muted mb-2">以下為開發測試按鈕，不會經過綠界（debug）</p>
+        <div class="flex gap-3">
+          <button
+            @click="handlePaySuccess"
+            :disabled="paying"
+            class="bg-sage text-white px-6 py-2 rounded-full text-xs font-medium hover:bg-sage/90 transition-colors disabled:opacity-50"
+          >
+            {{ paying ? '處理中...' : '付款成功 (debug)' }}
+          </button>
+          <button
+            @click="handlePayFail"
+            :disabled="paying"
+            class="bg-red-500 text-white px-6 py-2 rounded-full text-xs font-medium hover:bg-red-600 transition-colors disabled:opacity-50"
+          >
+            {{ paying ? '處理中...' : '付款失敗 (debug)' }}
+          </button>
+        </div>
+      </div>
     </div>
   </template>
 </div>

@@ -68,9 +68,27 @@ function initializeDatabase() {
     );
   `);
 
+  migrateOrdersAddPaymentColumns();
+
   // Seed data
   seedAdminUser();
   seedProducts();
+}
+
+function migrateOrdersAddPaymentColumns() {
+  const cols = db.prepare("PRAGMA table_info(orders)").all().map((c) => c.name);
+  const additions = [
+    ['payment_method', 'TEXT'],
+    ['ecpay_trade_no', 'TEXT'],
+    ['ecpay_payment_type', 'TEXT'],
+    ['paid_at', 'TEXT'],
+    ['payment_raw', 'TEXT'],
+  ];
+  for (const [name, type] of additions) {
+    if (!cols.includes(name)) {
+      db.exec(`ALTER TABLE orders ADD COLUMN ${name} ${type}`);
+    }
+  }
 }
 
 function seedAdminUser() {
