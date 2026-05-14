@@ -1,4 +1,4 @@
-const { createApp, ref, onMounted } = Vue;
+const { createApp, ref, computed, onMounted } = Vue;
 
 createApp({
   setup() {
@@ -11,6 +11,13 @@ createApp({
     const order = ref(null);
     const loading = ref(true);
     const paying = ref(false);
+    const selectedPaymentMethod = ref('Credit');
+
+    const paymentMethods = [
+      { value: 'Credit', label: '信用卡' },
+      { value: 'ATM', label: 'ATM 轉帳' },
+      { value: 'CVS', label: '超商代碼繳費' },
+    ];
 
     const statusMap = {
       pending: { label: '待付款', cls: 'bg-apricot/20 text-apricot' },
@@ -24,6 +31,13 @@ createApp({
       cancel: { text: '付款已取消。', cls: 'bg-apricot/10 text-apricot border border-apricot/20' },
       pending: { text: '尚未收到付款結果，請點「重新查詢付款狀態」確認。', cls: 'bg-apricot/10 text-apricot border border-apricot/20' },
     };
+
+    const hasAtmInfo = computed(() =>
+      order.value?.payment_info_vaccount && order.value?.payment_info_bank_code
+    );
+    const hasCvsInfo = computed(() =>
+      order.value?.payment_info_payment_no
+    );
 
     async function simulatePay(action) {
       if (!order.value || paying.value) return;
@@ -50,7 +64,8 @@ createApp({
       paying.value = true;
       try {
         const res = await apiFetch('/api/payments/ecpay/checkout/' + order.value.id, {
-          method: 'POST'
+          method: 'POST',
+          body: JSON.stringify({ paymentMethod: selectedPaymentMethod.value })
         });
         const { actionUrl, fields } = res.data;
         const form = document.createElement('form');
@@ -101,6 +116,8 @@ createApp({
       try {
         const res = await apiFetch('/api/orders/' + orderId);
         order.value = res.data;
+        if (order.value?.payment_info_vaccount) selectedPaymentMethod.value = 'ATM';
+        else if (order.value?.payment_info_payment_no) selectedPaymentMethod.value = 'CVS';
       } catch (e) {
         Notification.show('載入訂單失敗', 'error');
       } finally {
@@ -110,6 +127,7 @@ createApp({
 
     return {
       order, loading, paying, paymentResult, statusMap, paymentMessages,
+      selectedPaymentMethod, paymentMethods, hasAtmInfo, hasCvsInfo,
       handlePaySuccess, handlePayFail, goToEcpay, requeryPayment
     };
   }

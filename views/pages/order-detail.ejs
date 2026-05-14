@@ -70,16 +70,62 @@
       </table>
     </div>
 
+    <!-- ATM 繳費資訊 -->
+    <div v-if="hasAtmInfo" class="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-apricot/30">
+      <h2 class="font-medium text-text-primary mb-3">ATM 繳費資訊</h2>
+      <div class="text-sm space-y-2 text-text-secondary">
+        <p>銀行代碼：<span class="font-mono font-bold text-text-primary">{{ order.payment_info_bank_code }}</span></p>
+        <p>虛擬帳號：<span class="font-mono font-bold text-text-primary tracking-widest">{{ order.payment_info_vaccount }}</span></p>
+        <p v-if="order.payment_info_expire_date">繳費期限：{{ order.payment_info_expire_date }}</p>
+      </div>
+      <p class="text-xs text-text-muted mt-3">請至 ATM 輸入上方銀行代碼與帳號完成轉帳，付款完成後系統將自動更新狀態。</p>
+    </div>
+
+    <!-- CVS 繳費資訊 -->
+    <div v-if="hasCvsInfo" class="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-apricot/30">
+      <h2 class="font-medium text-text-primary mb-3">超商繳費資訊</h2>
+      <div class="text-sm space-y-2 text-text-secondary">
+        <p>繳費代碼：<span class="font-mono font-bold text-text-primary tracking-widest">{{ order.payment_info_payment_no }}</span></p>
+        <p v-if="order.payment_info_expire_date">繳費期限：{{ order.payment_info_expire_date }}</p>
+      </div>
+      <p class="text-xs text-text-muted mt-3">請至 7-11（ibon）、全家、萊爾富或 OK mart 輸入上方代碼完成繳費，付款完成後系統將自動更新狀態。</p>
+    </div>
+
     <!-- Payment Section -->
     <div v-if="order.status === 'pending'" class="bg-white rounded-2xl shadow-sm p-6">
-      <h2 class="font-medium text-text-primary mb-3">付款</h2>
+      <h2 class="font-medium text-text-primary mb-4">付款</h2>
+
+      <!-- 付款方式選擇 -->
+      <div class="mb-4">
+        <p class="text-sm text-text-secondary mb-2">選擇付款方式</p>
+        <div class="flex flex-wrap gap-2">
+          <label
+            v-for="m in paymentMethods"
+            :key="m.value"
+            class="flex items-center gap-2 cursor-pointer px-4 py-2 rounded-full border text-sm transition-colors"
+            :class="selectedPaymentMethod === m.value
+              ? 'border-rose-primary bg-rose-primary/5 text-rose-primary font-medium'
+              : 'border-gray-200 text-text-secondary hover:border-rose-primary/40'"
+          >
+            <input type="radio" :value="m.value" v-model="selectedPaymentMethod" class="sr-only" />
+            {{ m.label }}
+          </label>
+        </div>
+        <p v-if="selectedPaymentMethod === 'ATM'" class="text-xs text-text-muted mt-2">
+          取號後請至 ATM 轉帳，繳費期限 7 天，完成後系統將自動確認。
+        </p>
+        <p v-if="selectedPaymentMethod === 'CVS'" class="text-xs text-text-muted mt-2">
+          取號後請至超商輸入代碼繳費，繳費期限 3 天，完成後系統將自動確認。
+        </p>
+      </div>
+
       <div class="flex flex-wrap gap-3">
         <button
           @click="goToEcpay"
           :disabled="paying"
           class="bg-rose-primary text-white px-8 py-3 rounded-full text-sm font-medium hover:bg-rose-dark transition-colors disabled:opacity-50"
         >
-          {{ paying ? '處理中...' : '前往綠界付款' }}
+          {{ paying ? '處理中...' : (selectedPaymentMethod === 'Credit' ? '前往綠界付款' : '取得繳費資訊') }}
         </button>
         <button
           @click="requeryPayment"

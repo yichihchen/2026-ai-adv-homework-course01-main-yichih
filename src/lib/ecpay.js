@@ -102,9 +102,11 @@ function buildItemName(items) {
   return joined.length > 200 ? joined.slice(0, 197) + '...' : joined;
 }
 
-function buildAioFormParams(order, items, overrides = {}) {
+function buildAioFormParams(order, items, overrides = {}, paymentMethod = 'Credit') {
   const cfg = getConfig();
   const merchantTradeNo = orderNoToMerchantTradeNo(order.order_no);
+  const validMethods = ['Credit', 'ATM', 'CVS'];
+  const method = validMethods.includes(paymentMethod) ? paymentMethod : 'Credit';
 
   const params = {
     MerchantID: cfg.merchantId,
@@ -115,11 +117,20 @@ function buildAioFormParams(order, items, overrides = {}) {
     TradeDesc: overrides.TradeDesc || '花卉電商訂單付款',
     ItemName: buildItemName(items),
     ReturnURL: `${cfg.baseUrl}/api/payments/ecpay/notify`,
-    OrderResultURL: `${cfg.baseUrl}/api/payments/ecpay/result`,
     ClientBackURL: `${cfg.baseUrl}/orders/${order.id}`,
-    ChoosePayment: 'Credit',
+    ChoosePayment: method,
     EncryptType: '1',
   };
+
+  if (method === 'Credit') {
+    params.OrderResultURL = `${cfg.baseUrl}/api/payments/ecpay/result`;
+  } else if (method === 'ATM') {
+    params.ExpireDate = overrides.ExpireDate || '7';
+    params.PaymentInfoURL = `${cfg.baseUrl}/api/payments/ecpay/payment-info`;
+  } else if (method === 'CVS') {
+    params.StoreExpireDate = overrides.StoreExpireDate || '4320';
+    params.PaymentInfoURL = `${cfg.baseUrl}/api/payments/ecpay/payment-info`;
+  }
 
   params.CheckMacValue = generateCheckMacValue(params, cfg.hashKey, cfg.hashIV);
   return { actionUrl: cfg.aioUrl, fields: params };

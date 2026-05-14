@@ -94,7 +94,8 @@ router.post('/checkout/:orderId', authMiddleware, (req, res) => {
     });
   }
 
-  const { actionUrl, fields } = ecpay.buildAioFormParams(order, order.items);
+  const paymentMethod = req.body.paymentMethod || 'Credit';
+  const { actionUrl, fields } = ecpay.buildAioFormParams(order, order.items, {}, paymentMethod);
   res.json({
     data: { actionUrl, fields },
     error: null,
@@ -195,6 +196,68 @@ router.post('/query/:orderId', authMiddleware, async (req, res) => {
     error: null,
     message: '查詢完成',
   });
+});
+
+/**
+ * @openapi
+ * /api/payments/ecpay/payment-info:
+ *   post:
+ *     summary: 接收 ECPay ATM/CVS 取號結果通知（PaymentInfoURL）
+ *     tags: [Payments]
+ *     responses:
+ *       200:
+ *         description: 回傳 1|OK
+ */
+router.post('/payment-info', (req, res) => {
+  const cfg = ecpay.getConfig();
+  const body = req.body || {};
+
+  if (!ecpay.verifyCheckMacValue(body, cfg.hashKey, cfg.hashIV)) {
+    console.warn('[ECPay] /payment-info CheckMacValue verification failed', {
+      MerchantTradeNo: body.MerchantTradeNo,
+    });
+    return res.type('text/plain').send('1|OK');
+  }
+
+  const merchantTradeNo = body.MerchantTradeNo;
+  if (!merchantTradeNo) {
+    return res.type('text/plain').send('1|OK');
+  }
+
+  const order = db
+    .prepare("SELECT * FROM orders WHERE REPLACE(order_no, '-', '') = ?")
+    .get(merchantTradeNo);
+  if (!order) {
+    console.warn('[ECPay] /payment-info order not found for', merchantTradeNo);
+    return res.type('text/plain').send('1|OK');
+  }
+
+  const rtnCode = String(body.RtnCode || '');
+
+  if (rtnCode === '2') {
+    // ATM 取號成功
+    db.prepare(
+      `UPDATE orders SET
+         payment_method = COALESCE(payment_method, 'ecpay_atm'),
+         payment_info_bank_code = ?,
+         payment_info_vaccount = ?,
+         payment_info_expire_date = ?
+       WHERE id = ?`
+    ).run(body.BankCode || null, body.vAccount || null, body.ExpireDate || null, order.id);
+    console.log('[ECPay] ATM 取號成功 訂單=', merchantTradeNo, 'BankCode=', body.BankCode, 'vAccount=', body.vAccount);
+  } else if (rtnCode === '10100073') {
+    // CVS 取號成功
+    db.prepare(
+      `UPDATE orders SET
+         payment_method = COALESCE(payment_method, 'ecpay_cvs'),
+         payment_info_payment_no = ?,
+         payment_info_expire_date = ?
+       WHERE id = ?`
+    ).run(body.PaymentNo || null, body.ExpireDate || null, order.id);
+    console.log('[ECPay] CVS 取號成功 訂單=', merchantTradeNo, 'PaymentNo=', body.PaymentNo);
+  }
+
+  res.type('text/plain').send('1|OK');
 });
 
 /**

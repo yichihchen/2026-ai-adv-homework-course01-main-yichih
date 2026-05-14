@@ -83,6 +83,10 @@ function migrateOrdersAddPaymentColumns() {
     ['ecpay_payment_type', 'TEXT'],
     ['paid_at', 'TEXT'],
     ['payment_raw', 'TEXT'],
+    ['payment_info_bank_code', 'TEXT'],
+    ['payment_info_vaccount', 'TEXT'],
+    ['payment_info_payment_no', 'TEXT'],
+    ['payment_info_expire_date', 'TEXT'],
   ];
   for (const [name, type] of additions) {
     if (!cols.includes(name)) {
