@@ -34,6 +34,8 @@ Browser
 │   │   ├── adminMiddleware.js   # 驗證 req.user.role === 'admin'，否則 403
 │   │   ├── sessionMiddleware.js # 從 X-Session-Id header 提取 → req.sessionId
 │   │   └── errorHandler.js     # 全域錯誤處理：NODE_ENV=production 時隱藏錯誤細節
+│   ├── lib/
+│   │   └── ecpay.js             # ECPay 工具函式：CheckMacValue、AIO 表單、QueryTradeInfo
 │   └── routes/
 │       ├── authRoutes.js        # POST /register、POST /login、GET /profile
 │       ├── productRoutes.js     # GET /products、GET /products/:id
@@ -41,6 +43,7 @@ Browser
 │       ├── orderRoutes.js       # POST/GET /orders、GET/PATCH /orders/:id/pay
 │       ├── adminProductRoutes.js # Admin CRUD /admin/products
 │       ├── adminOrderRoutes.js   # Admin 訂單查詢 /admin/orders
+│       ├── paymentRoutes.js     # ECPay 金流：checkout、result、query、notify
 │       └── pageRoutes.js        # SSR 頁面路由，渲染 EJS templates
 │
 ├── public/
@@ -59,7 +62,7 @@ Browser
 │   │       ├── checkout.js        # 結帳 Vue app：收件人表單 + 建立訂單
 │   │       ├── login.js           # 登入/註冊 Vue app（tabbed）
 │   │       ├── orders.js          # 訂單列表 Vue app
-│   │       ├── order-detail.js    # 訂單詳情 Vue app：模擬付款
+│   │       ├── order-detail.js    # 訂單詳情 Vue app：ECPay 付款、查詢狀態、模擬付款（debug）
 │   │       ├── admin-products.js  # 管理後台商品 CRUD Vue app
 │   │       └── admin-orders.js    # 管理後台訂單列表 + 詳情 Modal
 │   └── stylesheets/
@@ -96,7 +99,8 @@ Browser
     ├── cart.test.js
     ├── orders.test.js
     ├── adminProducts.test.js
-    └── adminOrders.test.js
+    ├── adminOrders.test.js
+    └── payments.test.js       # ECPay 金流端點測試
 ```
 
 ## 啟動流程
@@ -112,7 +116,7 @@ Browser
    ├── cors({ origin: FRONTEND_URL })
    ├── express.static('public')
    ├── sessionMiddleware（全域，提取 X-Session-Id）
-   ├── 掛載 API 路由（/api/auth、/api/products、/api/cart、/api/orders、/api/admin/*）
+   ├── 掛載 API 路由（/api/auth、/api/products、/api/cart、/api/orders、/api/payments/ecpay、/api/admin/*）
    ├── 掛載頁面路由（pageRoutes）
    ├── 404 handler
    └── errorHandler（全域錯誤處理）
@@ -121,6 +125,7 @@ Browser
    ├── new Database('database.sqlite', { verbose: ... })
    ├── PRAGMA journal_mode = WAL
    ├── CREATE TABLE IF NOT EXISTS（users, products, cart_items, orders, order_items）
+   ├── migrateOrdersAddPaymentColumns()（ALTER TABLE 新增 ECPay 欄位，冪等）
    └── Seed data：admin 帳號 + 8 款花卉商品（僅在 users 表為空時插入）
 ```
 
@@ -140,7 +145,11 @@ Browser
 | POST | `/api/orders` | JWT | 從購物車建立訂單（DB transaction） |
 | GET | `/api/orders` | JWT | 取得用戶訂單列表 |
 | GET | `/api/orders/:id` | JWT | 取得訂單詳情 |
-| PATCH | `/api/orders/:id/pay` | JWT | 模擬付款（隨機成功/失敗） |
+| PATCH | `/api/orders/:id/pay` | JWT | 模擬付款（隨機成功/失敗，debug 用） |
+| POST | `/api/payments/ecpay/checkout/:orderId` | JWT | 產生 ECPay AIO 表單參數 |
+| POST | `/api/payments/ecpay/result` | 無（綠界回呼） | 瀏覽器付款結果回呼，驗簽後主動查詢，302 重新導向 |
+| POST | `/api/payments/ecpay/query/:orderId` | JWT | 主動向綠界查詢付款狀態並更新訂單 |
+| POST | `/api/payments/ecpay/notify` | 無（綠界回呼） | Server Notify 接收，回傳 `1\|OK` |
 | GET | `/api/admin/products` | JWT + admin | 管理後台商品列表 |
 | POST | `/api/admin/products` | JWT + admin | 建立商品 |
 | PUT | `/api/admin/products/:id` | JWT + admin | 更新商品 |
@@ -264,6 +273,11 @@ req.user（JWT 解析成功）> req.sessionId（X-Session-Id header）
 | recipient_address | TEXT | NOT NULL | 收件地址 |
 | total_amount | INTEGER | NOT NULL | 訂單總金額（整數，分為單位） |
 | status | TEXT | DEFAULT 'pending', CHECK IN ('pending','paid','failed') | 付款狀態 |
+| payment_method | TEXT | — | 付款方式（例如 `ecpay`） |
+| ecpay_trade_no | TEXT | — | 綠界交易編號（`TradeNo`） |
+| ecpay_payment_type | TEXT | — | 綠界付款類型（`PaymentType`，例如 `Credit_CreditCard`） |
+| paid_at | TEXT | — | 付款時間（綠界回傳之 `PaymentDate`） |
+| payment_raw | TEXT | — | 綠界查詢回應 JSON 原始資料 |
 | created_at | TEXT | DEFAULT datetime('now') | 建立時間 |
 
 ### order_items 表
@@ -279,12 +293,21 @@ req.user（JWT 解析成功）> req.sessionId（X-Session-Id header）
 
 ## 金流整合說明
 
-本專案目前實作**模擬付款**（`PATCH /api/orders/:id/pay`），行為如下：
+本專案同時支援**模擬付款**（開發測試用）與**綠界科技 ECPay AIO 金流**（真實付款）。
 
-1. 驗證訂單屬於目前登入用戶
-2. 驗證訂單狀態為 `pending`（已付款或失敗的訂單不可重複操作）
-3. 以亂數決定成功（70%）或失敗（30%）
-4. 更新 `orders.status` 為 `paid` 或 `failed`
-5. 回傳更新後的訂單資料
+### 模擬付款（debug）
 
-環境變數 `ECPAY_*` 已預留（`ECPAY_MERCHANT_ID`、`ECPAY_HASH_KEY`、`ECPAY_HASH_IV`、`ECPAY_ENV`），供未來串接綠界金流使用，但目前尚未實作真實金流邏輯。
+`PATCH /api/orders/:id/pay`：驗證訂單後以 `Math.random() < 0.7` 決定成功或失敗，直接更新 `orders.status`，不經過任何第三方金流。
+
+### ECPay 真實金流
+
+實作於 `src/lib/ecpay.js`（工具函式）與 `src/routes/paymentRoutes.js`（路由）。
+
+**付款流程：**
+1. 前端呼叫 `POST /api/payments/ecpay/checkout/:orderId`，後端回傳 AIO 表單參數（含 `CheckMacValue`）
+2. 前端動態建立 `<form>` 並 submit 到綠界付款頁面（`actionUrl`）
+3. 用戶完成付款後，綠界將瀏覽器 POST 到 `OrderResultURL`（`/api/payments/ecpay/result`）
+4. 後端驗證 `CheckMacValue`，再主動呼叫 `QueryTradeInfo` 確認交易，更新訂單後 302 重新導向
+5. 前端可在訂單詳情頁點「重新查詢付款狀態」，呼叫 `POST /api/payments/ecpay/query/:orderId` 手動確認
+
+**環境切換：** `ECPAY_ENV=staging`（預設，使用綠界測試環境），`ECPAY_ENV=production` 切換正式環境。

@@ -4,6 +4,28 @@
 
 ---
 
+## [1.1.0] - 2026-05-13
+
+### 新增
+
+**ECPay 金流串接**
+- `POST /api/payments/ecpay/checkout/:orderId` — 產生 AIO 表單參數，前端 submit 到綠界付款頁
+- `POST /api/payments/ecpay/result` — 瀏覽器付款結果回呼，驗 `CheckMacValue` 後主動查詢交易並更新訂單
+- `POST /api/payments/ecpay/query/:orderId` — 手動向綠界查詢付款狀態並更新訂單
+- `POST /api/payments/ecpay/notify` — Server Notify 接收端點（回傳 `1|OK`）
+- `src/lib/ecpay.js` — ECPay 工具模組（`buildAioFormParams`、`queryTradeInfo`、`generateCheckMacValue`、`verifyCheckMacValue`）
+- `tests/payments.test.js` — ECPay 金流端點測試
+
+**資料庫**
+- `orders` 表新增 5 個欄位（`payment_method`、`ecpay_trade_no`、`ecpay_payment_type`、`paid_at`、`payment_raw`），以冪等 migration 方式自動升級舊資料庫
+
+**前端**
+- 訂單詳情頁新增「前往綠界付款」主按鈕與「重新查詢付款狀態」按鈕
+- 新增 `pending` 付款狀態提示訊息（付款後未收到結果時顯示）
+- 原模擬付款按鈕移至「開發測試區塊」並標示 debug
+
+---
+
 ## [1.0.0] - 2026-05-11
 
 ### 新增

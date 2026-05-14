@@ -12,7 +12,7 @@
 | 後台商品管理 | 完成 |
 | 後台訂單管理 | 完成 |
 | OpenAPI 文件產生 | 完成 |
-| 真實金流串接（ECPay） | 未實作 |
+| 真實金流串接（ECPay） | ✅ 完成 |
 
 ---
 
@@ -205,6 +205,65 @@
 |------|------|------|---------|
 | `/api/admin/orders` | GET | JWT + admin | `status`（選填，`pending`/`paid`/`failed`） |
 | `/api/admin/orders/:id` | GET | JWT + admin | — |
+
+---
+
+## 真實金流串接（ECPay 綠界）
+
+### 行為描述
+
+透過綠界科技 AIO 金流（All-In-One Checkout）介接信用卡付款，完整實作「建立付款」、「接收結果回呼」、「主動查詢」三個流程。
+
+**前往付款**（`POST /api/payments/ecpay/checkout/:orderId`）：需 JWT，訂單需屬於當前用戶且狀態為 `pending`。後端以 `src/lib/ecpay.js` 組出 AIO 表單參數（含 `CheckMacValue`），回傳 `actionUrl` 與 `fields`。前端收到後動態建立 `<form>`、填入隱藏欄位，並以 `form.submit()` 導向綠界付款頁面。
+
+**瀏覽器付款結果回呼**（`POST /api/payments/ecpay/result`）：綠界於用戶付款後將瀏覽器以 POST 導向此端點（`OrderResultURL`）。後端驗證 `CheckMacValue`，再主動呼叫綠界 `QueryTradeInfo` API 確認交易狀態，依結果更新 `orders.status`，最後以 302 重新導向至 `/orders/:id?payment=<success|failed|pending>`。
+
+**主動查詢付款狀態**（`POST /api/payments/ecpay/query/:orderId`）：需 JWT。前端在訂單詳情頁點「重新查詢付款狀態」時觸發，後端向綠界查詢後更新訂單，回傳最新訂單資料。適用於付款後瀏覽器未正確導回、或需要手動確認狀態的情境。
+
+**Server Notify 接收**（`POST /api/payments/ecpay/notify`）：綠界後端 server-to-server 通知端點（`ReturnURL`）。本機開發時綠界無法呼叫到此端點，故僅回傳 `1|OK` 符合綠界規格。
+
+**MerchantTradeNo 轉換：** 訂單編號 `ORD-1715000000000-A3F9` → 去除 `-` → `ORD1715000000000A3F9`（綠界限制長度 ≤ 20 字元、不含特殊字元）。
+
+**CheckMacValue 計算：** 依綠界規格，參數按 Key 字母排序後以 URL encode（PHP 規則）組成字串，前後加 `HashKey=...&...&HashIV=...`，SHA256 雜湊後轉大寫；驗證時以 `crypto.timingSafeEqual` 防止 timing attack。
+
+**環境切換：** `ECPAY_ENV=staging`（預設）使用測試環境，`ECPAY_ENV=production` 切換正式環境。
+
+### 訂單狀態轉換
+
+| 綠界 `TradeStatus` | 轉換後 `orders.status` |
+|-------------------|-----------------------|
+| `1`（付款成功） | `paid` |
+| `0`（尚未付款） | 維持 `pending` |
+| `10200095`（付款失敗） | `failed` |
+| 其他非 `0`/`1` 值 | `failed` |
+
+### 端點規格
+
+| 端點 | 方法 | 認證 | 說明 |
+|------|------|------|------|
+| `/api/payments/ecpay/checkout/:orderId` | POST | JWT | 產生 AIO 表單參數，前端 submit 到綠界 |
+| `/api/payments/ecpay/result` | POST | 無（綠界呼叫） | 瀏覽器付款結果回呼，驗簽後主動查詢，302 重新導向 |
+| `/api/payments/ecpay/query/:orderId` | POST | JWT | 主動向綠界查詢付款狀態並更新訂單 |
+| `/api/payments/ecpay/notify` | POST | 無（綠界呼叫） | Server Notify 接收，僅回傳 `1\|OK` |
+
+### 錯誤碼
+
+| 情境 | 狀態碼 | error |
+|------|--------|-------|
+| 訂單不存在或不屬於此用戶 | 404 | `NOT_FOUND` |
+| 訂單狀態不是 `pending` | 400 | `INVALID_STATUS` |
+| CheckMacValue 驗證失敗 | 400 | — |
+| 向綠界查詢失敗（network/HTTP error） | 502 | `ECPAY_QUERY_FAILED` |
+
+### 環境變數
+
+| 變數 | 預設值（測試用） | 說明 |
+|------|--------------|------|
+| `ECPAY_ENV` | `staging` | `staging` 或 `production` |
+| `ECPAY_MERCHANT_ID` | `3002607` | 綠界特店編號 |
+| `ECPAY_HASH_KEY` | `pwFHCqoQZGmho4w6` | CheckMacValue 用 HashKey |
+| `ECPAY_HASH_IV` | `EkRm7iFT261dpevs` | CheckMacValue 用 HashIV |
+| `BASE_URL` | `http://localhost:3001` | 回呼 URL 基底（ReturnURL / OrderResultURL） |
 
 ---
 
